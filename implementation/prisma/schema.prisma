@@ -1,0 +1,266 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id             String   @id @default(cuid())
+  email          String   @unique
+  password       String
+  firstName      String
+  lastName       String
+  phone          String?
+  role           String   @default("STUDENT") // ADMIN, TEACHER, PARENT, STUDENT
+  locale         String   @default("fr")
+  notifyPush     Boolean  @default(true)
+  notifyEmail    Boolean  @default(true)
+  gdprConsent    Boolean  @default(false)
+  gdprConsentAt  DateTime?
+  active         Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  // Teacher-specific
+  teacherType    String?  // TITULAR, SUBSTITUTE
+
+  // Student-specific
+  gender         String?  // M, F
+  birthDate      DateTime?
+  parentId       String?
+  parent         User?    @relation("ParentChildren", fields: [parentId], references: [id])
+  children       User[]   @relation("ParentChildren")
+
+  classId        String?
+  class          Class?   @relation("ClassStudents", fields: [classId], references: [id])
+
+  // Teacher course relations
+  titularCourses    CourseSchedule[] @relation("TitularTeacher")
+  substituteCourses CourseSession[]  @relation("SubstituteTeacher")
+
+  // Attendance
+  attendances    Attendance[]
+
+  // Progress
+  progressItems  ProgressItem[]
+
+  // Payments
+  payments       Payment[]
+
+  // Notifications
+  notifications  Notification[]
+
+  // Board meeting attendance
+  boardAttendances BoardAttendance[]
+
+  @@index([role])
+  @@index([parentId])
+  @@index([classId])
+}
+
+model Discipline {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  createdAt DateTime @default(now())
+  classes   Class[]
+}
+
+model Class {
+  id             String   @id @default(cuid())
+  name           String
+  organizationType String // BY_SUBJECT, BY_AGE
+  ageMin         Int?
+  ageMax         Int?
+  disciplineId   String
+  discipline     Discipline @relation(fields: [disciplineId], references: [id])
+  schoolYearId   String
+  schoolYear     SchoolYear @relation(fields: [schoolYearId], references: [id])
+  active         Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  students       User[]   @relation("ClassStudents")
+  courseSchedules CourseSchedule[]
+
+  @@index([disciplineId])
+  @@index([schoolYearId])
+}
+
+model Room {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  capacity  Int?
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  courseSchedules CourseSchedule[]
+}
+
+model CourseSchedule {
+  id            String   @id @default(cuid())
+  classId       String
+  class         Class    @relation(fields: [classId], references: [id])
+  teacherId     String
+  teacher       User     @relation("TitularTeacher", fields: [teacherId], references: [id])
+  roomId        String
+  room          Room     @relation(fields: [roomId], references: [id])
+  dayOfWeek     Int      // 0=Sunday ... 6=Saturday
+  startTime     String   // "HH:mm"
+  endTime       String   // "HH:mm"
+  isCollective  Boolean  @default(false)
+  schoolYearId  String
+  schoolYear    SchoolYear @relation(fields: [schoolYearId], references: [id])
+  active        Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  sessions      CourseSession[]
+
+  @@index([classId])
+  @@index([teacherId])
+  @@index([roomId])
+  @@index([schoolYearId])
+}
+
+model CourseSession {
+  id                String   @id @default(cuid())
+  courseScheduleId  String
+  courseSchedule    CourseSchedule @relation(fields: [courseScheduleId], references: [id])
+  date              DateTime
+  status            String   @default("SCHEDULED") // SCHEDULED, COMPLETED, CANCELLED
+  cancelReason      String?
+  content           String?  @db.Text
+  homework          String?  @db.Text
+  substituteId      String?
+  substitute        User?    @relation("SubstituteTeacher", fields: [substituteId], references: [id])
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  attendances       Attendance[]
+
+  @@index([courseScheduleId])
+  @@index([date])
+}
+
+model Attendance {
+  id              String   @id @default(cuid())
+  courseSessionId  String
+  courseSession    CourseSession @relation(fields: [courseSessionId], references: [id])
+  studentId       String
+  student         User     @relation(fields: [studentId], references: [id])
+  status          String   @default("ABSENT") // PRESENT, ABSENT, LATE
+  arrivalTime     DateTime?
+  lateMinutes     Int      @default(0)
+  createdAt       DateTime @default(now())
+
+  @@unique([courseSessionId, studentId])
+  @@index([studentId])
+}
+
+model ProgressItem {
+  id          String   @id @default(cuid())
+  studentId   String
+  student     User     @relation(fields: [studentId], references: [id])
+  title       String
+  level       String   @default("LEARNING") // ACQUIRED, IN_PROGRESS, LEARNING
+  order       Int      @default(0)
+  schoolYearId String
+  schoolYear  SchoolYear @relation(fields: [schoolYearId], references: [id])
+  validatedAt DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([studentId])
+  @@index([schoolYearId])
+}
+
+model Payment {
+  id          String   @id @default(cuid())
+  studentId   String
+  student     User     @relation(fields: [studentId], references: [id])
+  amount      Float
+  type        String   @default("NORMAL") // NORMAL, REDUCED, FREE
+  date        DateTime
+  schoolYearId String
+  schoolYear  SchoolYear @relation(fields: [schoolYearId], references: [id])
+  notes       String?
+  createdAt   DateTime @default(now())
+
+  @@index([studentId])
+  @@index([schoolYearId])
+}
+
+model SchoolYear {
+  id        String   @id @default(cuid())
+  name      String   @unique // e.g. "2025-2026"
+  startDate DateTime
+  endDate   DateTime
+  active    Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  classes        Class[]
+  courseSchedules CourseSchedule[]
+  progressItems  ProgressItem[]
+  payments       Payment[]
+  boardMeetings  BoardMeeting[]
+}
+
+model BoardMeeting {
+  id           String   @id @default(cuid())
+  date         DateTime
+  notes        String?  @db.Text
+  schoolYearId String
+  schoolYear   SchoolYear @relation(fields: [schoolYearId], references: [id])
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  attendances  BoardAttendance[]
+  decisions    BoardDecision[]
+
+  @@index([schoolYearId])
+}
+
+model BoardAttendance {
+  id            String   @id @default(cuid())
+  boardMeetingId String
+  boardMeeting  BoardMeeting @relation(fields: [boardMeetingId], references: [id])
+  memberId      String
+  member        User     @relation(fields: [memberId], references: [id])
+  present       Boolean  @default(false)
+
+  @@unique([boardMeetingId, memberId])
+}
+
+model BoardDecision {
+  id              String   @id @default(cuid())
+  boardMeetingId  String
+  boardMeeting    BoardMeeting @relation(fields: [boardMeetingId], references: [id])
+  description     String   @db.Text
+  reviewDate      DateTime
+  applied         Boolean?
+  notAppliedReason String?  @db.Text
+  reviewedAt      DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([boardMeetingId])
+  @@index([reviewDate])
+}
+
+model Notification {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  type      String   // ABSENCE_ALERT, PAYMENT_REMINDER, COURSE_REMINDER, COURSE_CANCELLED, etc.
+  title     String
+  message   String
+  read      Boolean  @default(false)
+  channel   String   @default("PUSH") // PUSH, EMAIL
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([createdAt])
+}
